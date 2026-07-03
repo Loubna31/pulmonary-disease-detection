@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}Gestion des comptes{% endblock %}
+{% block page_title %}<i class="fa-solid fa-users-gear me-2"></i>Gestion des comptes{% endblock %}
+
+{% block content %}
+<!-- Create account button -->
+<div class="d-flex justify-content-end mb-3">
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
+    <i class="fa-solid fa-plus me-2"></i>Créer un compte
+  </button>
+</div>
+
+<!-- Médecins -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-0">
+    <h6 class="mb-0 fw-semibold">
+      <i class="fa-solid fa-user-doctor me-2 text-primary"></i>Médecins
+      <span class="badge bg-primary ms-2">{{ medecins | length }}</span>
+    </h6>
+  </div>
+  <div class="card-body p-0">
+    {% if medecins %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Nom d'utilisateur</th>
+            <th>Email</th>
+            <th>Mot de passe</th>
+            <th>Statut</th>
+            <th>Créé le</th>
+            <th class="text-center">Actions</th>
+            <th class="text-center">Mot de passe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in medecins %}
+          <tr class="{% if not u.is_active_account %}table-secondary text-muted{% endif %}">
+            <td class="fw-semibold">
+              <i class="fa-solid fa-circle-user me-2 text-primary"></i>{{ u.username }}
+            </td>
+            <td>{{ u.email }}</td>
+            <td>
+              <div class="input-group input-group-sm" style="max-width:200px;">
+                <input type="password" class="form-control pwd-field"
+                       value="{{ u.plain_password }}" readonly />
+                <button class="btn btn-outline-secondary toggle-pwd" type="button">
+                  <i class="fa-solid fa-eye"></i>
+                </button>
+              </div>
+            </td>
+            <td>
+              {% if u.is_active_account %}
+                <span class="badge bg-success-subtle text-success">Actif</span>
+              {% else %}
+                <span class="badge bg-danger-subtle text-danger">Désactivé</span>
+              {% endif %}
+            </td>
+            <td class="text-muted small">{{ u.created_at.strftime('%d/%m/%Y') }}</td>
+            <td class="text-center">
+              <div class="d-flex gap-1 justify-content-center">
+              {% if u.is_active_account %}
+              <form method="POST"
+                    action="{{ url_for('admin.delete_account', user_id=u.id) }}"
+                    onsubmit="return confirm('Désactiver le compte de {{ u.username }} ?')">
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                  <i class="fa-solid fa-ban me-1"></i>Désactiver
+                </button>
+              </form>
+              {% else %}
+              <form method="POST"
+                    action="{{ url_for('admin.restore_account', user_id=u.id) }}">
+                <button type="submit" class="btn btn-sm btn-outline-success">
+                  <i class="fa-solid fa-rotate-left me-1"></i>Réactiver
+                </button>
+              </form>
+              {% endif %}
+              </div>
+            </td>
+            <td class="text-center">
+              <button class="btn btn-sm btn-outline-warning"
+                      data-bs-toggle="modal"
+                      data-bs-target="#resetPwdModal"
+                      data-uid="{{ u.id }}"
+                      data-uname="{{ u.username }}">
+                <i class="fa-solid fa-key me-1"></i>Reset
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="text-muted text-center py-4">Aucun médecin enregistré.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Chefs de service -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white border-0">
+    <h6 class="mb-0 fw-semibold">
+      <i class="fa-solid fa-star me-2 text-warning"></i>Chefs de service
+      <span class="badge bg-warning text-dark ms-2">{{ chefs | length }}</span>
+    </h6>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Nom d'utilisateur</th>
+            <th>Email</th>
+            <th>Mot de passe</th>
+            <th>Créé le</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in chefs %}
+          <tr>
+            <td class="fw-semibold">
+              <i class="fa-solid fa-star me-2 text-warning"></i>{{ u.username }}
+              {% if u.id == current_user.id %}
+                <span class="badge bg-secondary ms-1">Vous</span>
+              {% endif %}
+            </td>
+            <td>{{ u.email }}</td>
+            <td>
+              <div class="input-group input-group-sm" style="max-width:200px;">
+                <input type="password" class="form-control pwd-field"
+                       value="{{ u.plain_password }}" readonly />
+                <button class="btn btn-outline-secondary toggle-pwd" type="button">
+                  <i class="fa-solid fa-eye"></i>
+                </button>
+              </div>
+            </td>
+            <td class="text-muted small">{{ u.created_at.strftime('%d/%m/%Y') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div class="modal fade" id="resetPwdModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">
+          <i class="fa-solid fa-key me-2 text-warning"></i>Réinitialiser le mot de passe
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="resetPwdForm" action="" novalidate>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Nouveau mot de passe pour <strong id="resetPwdUsername"></strong>
+          </p>
+          <div class="input-group">
+            <input type="password" name="new_password" id="resetPwdField"
+                   class="form-control" placeholder="Minimum 6 caractères" required minlength="6" />
+            <button type="button" class="btn btn-outline-secondary" id="toggleResetPwd">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Annuler</button>
+          <button type="submit" class="btn btn-warning fw-semibold">
+            <i class="fa-solid fa-check me-1"></i>Confirmer
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Create account modal -->
+<div class="modal fade" id="createModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">
+          <i class="fa-solid fa-user-plus me-2 text-primary"></i>Créer un compte
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('admin.create_account') }}" novalidate>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Rôle</label>
+            <select name="role" class="form-select" id="roleSelect">
+              <option value="medecin">Médecin</option>
+              <option value="chef_service">Chef de service</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Nom d'utilisateur</label>
+            <input type="text" name="username" class="form-control"
+                   placeholder="ex: dr.benali" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Email</label>
+            <input type="email" name="email" class="form-control"
+                   placeholder="medecin@hopital.dz" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Mot de passe</label>
+            <div class="input-group">
+              <input type="password" name="password" id="newPwd" class="form-control"
+                     placeholder="Minimum 6 caractères" required />
+              <button type="button" class="btn btn-outline-secondary" id="toggleNewPwd">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Annuler</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-plus me-1"></i>Créer
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Toggle password visibility in table
+  document.querySelectorAll('.toggle-pwd').forEach(btn => {
+    btn.addEventListener('click', function () {
+      const input = this.previousElementSibling;
+      const icon  = this.querySelector('i');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.replace('fa-eye', 'fa-eye-slash');
+      } else {
+        input.type = 'password';
+        icon.classList.replace('fa-eye-slash', 'fa-eye');
+      }
+    });
+  });
+
+  // Toggle new password in modal
+  document.getElementById('toggleNewPwd').addEventListener('click', function () {
+    const input = document.getElementById('newPwd');
+    const icon  = this.querySelector('i');
+    if (input.type === 'password') {
+      input.type = 'text';
+      icon.classList.replace('fa-eye', 'fa-eye-slash');
+    } else {
+      input.type = 'password';
+      icon.classList.replace('fa-eye-slash', 'fa-eye');
+    }
+  });
+
+  // Reset password modal — fill user id & name dynamically
+  document.getElementById('resetPwdModal').addEventListener('show.bs.modal', function (e) {
+    const btn   = e.relatedTarget;
+    const uid   = btn.getAttribute('data-uid');
+    const uname = btn.getAttribute('data-uname');
+    document.getElementById('resetPwdUsername').textContent = uname;
+    document.getElementById('resetPwdField').value = '';
+    document.getElementById('resetPwdForm').action =
+      '/admin/accounts/reset-password/' + uid;
+  });
+
+  // Toggle reset password visibility
+  document.getElementById('toggleResetPwd').addEventListener('click', function () {
+    const input = document.getElementById('resetPwdField');
+    const icon  = this.querySelector('i');
+    if (input.type === 'password') {
+      input.type = 'text';
+      icon.classList.replace('fa-eye', 'fa-eye-slash');
+    } else {
+      input.type = 'password';
+      icon.classList.replace('fa-eye-slash', 'fa-eye');
+    }
+  });
+</script>
+{% endblock %}

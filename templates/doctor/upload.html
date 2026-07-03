@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Nouvelle analyse{% endblock %}
+{% block page_title %}<i class="fa-solid fa-x-ray me-2"></i>Nouvelle analyse radiographique{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <form method="POST" action="{{ url_for('doctor.upload') }}"
+          enctype="multipart/form-data" id="uploadForm" novalidate>
+
+      <!-- Step 1 : Image -->
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h6 class="fw-bold mb-3">
+            <span class="step-badge">1</span>Image radiographique
+          </h6>
+
+          <div class="drop-zone" id="dropZone">
+            <i class="fa-solid fa-cloud-arrow-up fa-3x text-primary mb-3"></i>
+            <p class="mb-1 fw-semibold">Glissez-déposez votre image ici</p>
+            <p class="text-muted small mb-3">ou cliquez pour sélectionner</p>
+            <input type="file" name="image" id="imageInput"
+                   accept=".png,.jpg,.jpeg,.bmp,.tiff,.dcm" class="d-none" required />
+            <button type="button" class="btn btn-outline-primary btn-sm"
+                    onclick="document.getElementById('imageInput').click()">
+              <i class="fa-solid fa-folder-open me-1"></i>Parcourir
+            </button>
+          </div>
+
+          <!-- Preview -->
+          <div id="imagePreview" class="d-none mt-3 text-center">
+            <img id="previewImg" src="#" alt="Aperçu"
+                 class="img-fluid rounded shadow-sm" style="max-height:220px;" />
+            <p id="fileName" class="text-muted small mt-2 mb-0"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 : Model -->
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h6 class="fw-bold mb-3"><span class="step-badge">2</span>Choisir le modèle</h6>
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="model-card" id="card-vit">
+                <input type="radio" name="model" value="vit" class="d-none model-radio" required />
+                <div class="model-icon"><i class="fa-solid fa-brain fa-2x text-primary"></i></div>
+                <div class="fw-bold mt-2">ViT</div>
+                <div class="text-muted small">Vision Transformer</div>
+                <div class="badge bg-info-subtle text-info mt-1">Energy OOD</div>
+              </label>
+            </div>
+            <div class="col-6">
+              <label class="model-card" id="card-efficient">
+                <input type="radio" name="model" value="efficient" class="d-none model-radio" required />
+                <div class="model-icon"><i class="fa-solid fa-microchip fa-2x text-success"></i></div>
+                <div class="fw-bold mt-2">EfficientNet</div>
+                <div class="badge bg-success-subtle text-success mt-1">Energy / Mahalanobis</div>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 : Method (EfficientNet only) -->
+      <div class="card border-0 shadow-sm mb-4" id="methodCard" style="display:none!important;">
+        <div class="card-body">
+          <h6 class="fw-bold mb-3"><span class="step-badge">3</span>Méthode de détection OOD</h6>
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="model-card" id="card-energy">
+                <input type="radio" name="method" value="energy" class="d-none method-radio" />
+                <div class="model-icon"><i class="fa-solid fa-bolt fa-2x text-warning"></i></div>
+                <div class="fw-bold mt-2">Energy</div>
+                <div class="text-muted small">Score énergétique</div>
+              </label>
+            </div>
+            <div class="col-6">
+              <label class="model-card" id="card-mahal">
+                <input type="radio" name="method" value="mahalanobis" class="d-none method-radio" />
+                <div class="model-icon"><i class="fa-solid fa-chart-scatter fa-2x text-purple"></i></div>
+                <div class="fw-bold mt-2">Mahalanobis</div>
+                <div class="text-muted small">Distance statistique</div>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="d-grid">
+        <button type="submit" class="btn btn-primary btn-lg fw-bold" id="submitBtn" disabled>
+          <i class="fa-solid fa-magnifying-glass-plus me-2"></i>Lancer l'analyse
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const imageInput   = document.getElementById('imageInput');
+const dropZone     = document.getElementById('dropZone');
+const previewDiv   = document.getElementById('imagePreview');
+const previewImg   = document.getElementById('previewImg');
+const fileName     = document.getElementById('fileName');
+const modelRadios  = document.querySelectorAll('.model-radio');
+const methodCard   = document.getElementById('methodCard');
+const methodRadios = document.querySelectorAll('.method-radio');
+const submitBtn    = document.getElementById('submitBtn');
+
+let hasImage  = false;
+let hasModel  = false;
+let hasMethod = false;
+let needsMethod = false;
+
+function updateSubmit() {
+  submitBtn.disabled = !(hasImage && hasModel && (!needsMethod || hasMethod));
+}
+
+// Image selection
+function handleFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    previewImg.src = e.target.result;
+    fileName.textContent = file.name;
+    previewDiv.classList.remove('d-none');
+  };
+  reader.readAsDataURL(file);
+  hasImage = true;
+  updateSubmit();
+}
+
+imageInput.addEventListener('change', () => handleFile(imageInput.files[0]));
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) { imageInput.files = e.dataTransfer.files; handleFile(file); }
+});
+
+// Model selection
+modelRadios.forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+    const card = document.getElementById('card-' + radio.value);
+    if (card) card.classList.add('selected');
+
+    needsMethod = radio.value === 'efficient';
+    methodCard.style.setProperty('display', needsMethod ? 'block' : 'none', 'important');
+
+    // Reset method if switching to ViT
+    if (!needsMethod) {
+      methodRadios.forEach(m => m.checked = false);
+      document.querySelectorAll('[id^="card-energy"],[id^="card-mahal"]')
+              .forEach(c => c.classList.remove('selected'));
+      hasMethod = false;
+    }
+    hasModel = true;
+    updateSubmit();
+  });
+});
+
+// Method selection
+methodRadios.forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.getElementById('card-energy').classList.remove('selected');
+    document.getElementById('card-mahal').classList.remove('selected');
+    const card = radio.value === 'energy' ? document.getElementById('card-energy')
+                                           : document.getElementById('card-mahal');
+    card.classList.add('selected');
+    hasMethod = true;
+    updateSubmit();
+  });
+});
+
+// Clicking on model cards triggers the hidden radio
+document.querySelectorAll('.model-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const radio = card.querySelector('input[type="radio"]');
+    if (radio) radio.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+});
+</script>
+{% endblock %}

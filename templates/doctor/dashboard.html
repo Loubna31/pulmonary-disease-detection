@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Mon tableau de bord{% endblock %}
+{% block page_title %}<i class="fa-solid fa-house-medical me-2"></i>Tableau de bord{% endblock %}
+
+{% block content %}
+
+<!-- Welcome banner -->
+<div class="welcome-banner mb-4">
+  <div>
+    <h4 class="mb-1 fw-bold text-white">
+      Bonjour, Dr. {{ current_user.username }} 👋
+    </h4>
+    <p class="mb-0 small" style="color:rgba(255,255,255,.65);">
+      Système d'aide au diagnostic radiologique par IA
+    </p>
+  </div>
+  <a href="{{ url_for('doctor.upload') }}" class="btn btn-light fw-semibold px-4">
+    <i class="fa-solid fa-plus me-2 text-emerald"></i>Nouvelle analyse
+  </a>
+</div>
+
+<!-- Stat cards (4) -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3">
+    <div class="stat-card border-primary">
+      <div class="stat-icon bg-primary-subtle text-primary">
+        <i class="fa-solid fa-x-ray"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Analyses totales</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ total }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl-3">
+    <div class="stat-card border-success">
+      <div class="stat-icon bg-success-subtle text-success">
+        <i class="fa-solid fa-circle-check"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Validées</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ validated_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl-3">
+    <div class="stat-card border-danger">
+      <div class="stat-icon bg-danger-subtle text-danger">
+        <i class="fa-solid fa-circle-question"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Cas inconnus</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ unknown_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl-3">
+    <div class="stat-card border-danger">
+      <div class="stat-icon bg-danger-subtle text-danger">
+        <i class="fa-solid fa-pen-to-square"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Corrigées</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ corrected_count }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Per-disease breakdown + Recent analyses -->
+<div class="row g-3 mb-0">
+
+  <!-- Disease breakdown -->
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header d-flex align-items-center">
+        <h6 class="mb-0 fw-semibold">
+          <i class="fa-solid fa-chart-pie me-2" style="color:var(--primary);"></i>
+          Maladies détectées
+        </h6>
+      </div>
+      <div class="card-body">
+        {% if disease_counts %}
+          {% set max_count = disease_counts.values() | max %}
+          {% for disease, count in disease_counts.items() %}
+          {% set pct = (count / max_count * 100) | int %}
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="small fw-semibold" style="color:#065f46;">{{ disease }}</span>
+              <span class="badge bg-primary-subtle text-primary fw-bold">{{ count }}</span>
+            </div>
+            <div class="progress" style="height:7px;">
+              <div class="progress-bar" style="width:{{ pct }}%;background:var(--primary);"></div>
+            </div>
+          </div>
+          {% endfor %}
+
+          {% if unknown_count > 0 %}
+          <div class="mb-0">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="small fw-semibold text-danger">
+                <i class="fa-solid fa-circle-question me-1"></i>Inconnus
+              </span>
+              <span class="badge bg-danger-subtle text-danger fw-bold">{{ unknown_count }}</span>
+            </div>
+            {% set pct_unk = (unknown_count / max_count * 100) | int %}
+            <div class="progress" style="height:7px;">
+              <div class="progress-bar bg-danger" style="width:{{ [pct_unk,100]|min }}%;"></div>
+            </div>
+          </div>
+          {% endif %}
+        {% else %}
+          <div class="text-center py-4">
+            <i class="fa-solid fa-chart-pie fa-2x mb-2" style="color:#d1fae5;"></i>
+            <p class="text-muted small mb-0">Aucune donnée disponible</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent analyses table -->
+  <div class="col-md-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 fw-semibold">
+          <i class="fa-solid fa-clock-rotate-left me-2" style="color:var(--primary);"></i>
+          Analyses récentes
+        </h6>
+        <a href="{{ url_for('doctor.history') }}" class="btn btn-sm btn-outline-primary">
+          Voir tout <i class="fa-solid fa-arrow-right ms-1"></i>
+        </a>
+      </div>
+      <div class="card-body p-0">
+        {% if recent_predictions %}
+        <div class="table-responsive" style="max-height:420px;overflow-y:auto;">
+          <table class="table table-hover align-middle mb-0" style="font-size:.83rem;">
+            <thead style="position:sticky;top:0;z-index:2;">
+              <tr>
+                <th>ID Image</th>
+                <th>Modèle</th>
+                <th>Méthode OOD</th>
+                <th>Résultat IA</th>
+                <th>Diagnostic final</th>
+                <th>Statut</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in recent_predictions %}
+              <tr class="table-row-link"
+                  onclick="window.location='{{ url_for('doctor.result', pred_id=p.id) }}'">
+                <td>
+                  <span class="badge bg-secondary-subtle text-secondary fw-normal"
+                        title="{{ p.image_filename }}"
+                        style="font-family:monospace;font-size:.75rem;">
+                    {{ p.image_filename.split('.')[0][:12] }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge bg-primary-subtle text-primary fw-semibold">
+                    {{ p.model_used | upper }}
+                  </span>
+                </td>
+                <td>
+                  {% if p.method_used %}
+                    <span class="badge bg-secondary-subtle text-secondary">{{ p.method_used }}</span>
+                  {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if p.is_known %}
+                    <span class="fw-semibold">{{ p.predicted_disease }}</span>
+                  {% else %}
+                    <span class="text-danger fw-semibold">
+                      <i class="fa-solid fa-circle-question me-1"></i>Inconnu
+                    </span>
+                  {% endif %}
+                </td>
+                <td class="text-muted">{{ p.final_disease or '—' }}</td>
+                <td>
+                  <span class="badge bg-{{ p.status_class }}-subtle text-{{ p.status_class }}">
+                    {{ p.status_label }}
+                  </span>
+                </td>
+                <td class="text-muted">{{ p.created_at.strftime('%d/%m %H:%M') }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+          <div class="text-center py-5">
+            <i class="fa-solid fa-x-ray fa-3x mb-3" style="color:#d1fae5;"></i>
+            <p class="text-muted mb-3">Aucune analyse effectuée. Commencez par uploader une image.</p>
+            <a href="{{ url_for('doctor.upload') }}" class="btn btn-emerald px-4">
+              <i class="fa-solid fa-plus me-2"></i>Nouvelle analyse
+            </a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

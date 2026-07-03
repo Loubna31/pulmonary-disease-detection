@@ -1,0 +1,753 @@
+{% extends "base.html" %}
+{% block title %}Résultat — Analyse #{{ pred.id }}{% endblock %}
+{% block page_title %}<i class="fa-solid fa-microscope me-2"></i>Résultat de l'analyse #{{ pred.id }}{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+
+  <!-- ══════════════════════════════════════════════════════════
+       COLONNE GAUCHE : Image + OOD gauge
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="col-lg-4">
+
+    <!-- Image originale -->
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-white border-0 pb-0">
+        <h6 class="fw-semibold mb-0"><i class="fa-solid fa-image me-2 text-primary"></i>Image radiographique</h6>
+      </div>
+      <div class="card-body text-center py-2">
+        <img src="{{ url_for('uploaded_file', filename=pred.image_filename) }}"
+             alt="Radiographie"
+             class="img-fluid rounded shadow-sm"
+             style="max-height:240px; object-fit:contain;"
+             onerror="this.src='https://placehold.co/400x300/e3e8f0/6c757d?text=Image+non+disponible'" />
+      </div>
+    </div>
+
+    <!-- OOD : distance vs seuil -->
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-white border-0 pb-0">
+        <h6 class="fw-semibold mb-0">
+          <i class="fa-solid fa-radar me-2 text-{{ 'success' if pred.is_known else 'warning' }}"></i>
+          Score OOD
+          <span class="badge ms-1
+            {% if pred.is_known %}bg-success-subtle text-success
+            {% else %}bg-warning-subtle text-warning{% endif %}">
+            {{ 'Connu' if pred.is_known else 'Inconnu (OOD)' }}
+          </span>
+        </h6>
+      </div>
+      <div class="card-body">
+        {% if pred.ood_distance is not none and pred.ood_threshold is not none %}
+          {% set pct = [(pred.ood_distance / pred.ood_threshold * 100)|int, 150]|min %}
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-muted">
+              {% if pred.method_used == 'mahalanobis' %}Distance Mahalanobis
+              {% else %}Energy Distance{% endif %}
+            </span>
+            <span class="fw-bold">{{ pred.ood_distance | round(4) }}</span>
+          </div>
+          <div class="progress mb-1" style="height:10px;">
+            <div class="progress-bar
+              {% if pred.is_known %}bg-success{% else %}bg-danger{% endif %}"
+              role="progressbar"
+              style="width:{{ [pct, 100]|min }}%"></div>
+          </div>
+          <div class="d-flex justify-content-between x-small text-muted">
+            <span>0</span>
+            <span>Seuil : {{ pred.ood_threshold | round(4) }}</span>
+          </div>
+          <div class="mt-2 text-center">
+            {% if pred.is_known %}
+              <span class="badge bg-success">
+                <i class="fa-solid fa-circle-check me-1"></i>
+                {{ pred.ood_distance | round(2) }} ≤ {{ pred.ood_threshold | round(2) }} → IN-DISTRIBUTION
+              </span>
+            {% else %}
+              <span class="badge bg-danger">
+                <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                {{ pred.ood_distance | round(2) }} > {{ pred.ood_threshold | round(2) }} → OUT-OF-DISTRIBUTION
+              </span>
+            {% endif %}
+          </div>
+        {% else %}
+          <p class="text-muted small mb-0">Score non disponible.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Infos modèle -->
+    <div class="card border-0 shadow-sm">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex flex-wrap gap-2">
+          <span class="badge bg-primary fs-6">
+            <i class="fa-solid fa-microchip me-1"></i>{{ pred.model_used | upper }}
+          </span>
+          {% if pred.method_used %}
+          <span class="badge bg-secondary fs-6">
+            <i class="fa-solid fa-sliders me-1"></i>{{ pred.method_used | capitalize }}
+          </span>
+          {% endif %}
+          <span class="badge bg-info-subtle text-info fs-6">
+            {{ pred.created_at.strftime('%d/%m/%Y %H:%M') }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /col gauche -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       COLONNE DROITE : Explainabilité + Perturbation + Verdict
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="col-lg-8">
+
+    <!-- ── Bouton Afficher explicabilité ──────────────────── -->
+    <div class="d-flex gap-2 mb-3">
+      <button id="btnExpl" class="btn btn-outline-purple fw-semibold"
+              onclick="loadExplicabilite()">
+        <i class="fa-solid fa-eye me-2"></i>Afficher l'explicabilité
+      </button>
+    </div>
+
+    <!-- ── Explicabilité : grille 2×2 (cachée par défaut) ── -->
+    <div id="explSection" class="card border-0 shadow-sm mb-3" style="display:none;">
+      <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center">
+        <h6 class="fw-semibold mb-0">
+          <i class="fa-solid fa-eye me-2 text-purple"></i>Cartes d'explicabilité
+        </h6>
+        <button class="btn btn-sm btn-light" onclick="hideExpl()">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+
+          <!-- GradCAM++ — JET colormap -->
+          <div class="col-6">
+            <div class="expl-map-card">
+              <div class="expl-map-label text-danger">
+                <i class="fa-solid fa-fire me-1"></i>GradCAM++
+              </div>
+              {% if pred.gradcam_filename %}
+                <img id="img_gradcam"
+                     src="{{ url_for('static', filename='explainability/' + pred.gradcam_filename) }}"
+                     alt="GradCAM++" class="expl-map-img" />
+                <div id="ph_gradcam" style="display:none;"></div>
+              {% else %}
+                <div id="ph_gradcam" class="expl-map-placeholder">
+                  <i class="fa-solid fa-hourglass-half text-muted fa-2x mb-2"></i>
+                  <p class="text-muted small mb-0">Cliquez sur "Afficher l'explicabilité"</p>
+                </div>
+                <img id="img_gradcam" class="expl-map-img" style="display:none;" alt="GradCAM++" />
+              {% endif %}
+              <div class="expl-map-legend">
+                <span class="legend-dot" style="background:#00f;"></span><span class="text-muted me-2">Faible</span>
+                <span class="legend-dot" style="background:#0f0;"></span><span class="text-muted me-2">Moyen</span>
+                <span class="legend-dot" style="background:#ff0;"></span><span class="text-muted me-2">Élevé</span>
+                <span class="legend-dot" style="background:#f00;"></span><span class="text-muted">Critique</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- SHAP — VIRIDIS colormap -->
+          <div class="col-6">
+            <div class="expl-map-card">
+              <div class="expl-map-label text-info">
+                <i class="fa-solid fa-chart-area me-1"></i>SHAP
+              </div>
+              {% if pred.shap_filename %}
+                <img id="img_shap"
+                     src="{{ url_for('static', filename='explainability/' + pred.shap_filename) }}"
+                     alt="SHAP" class="expl-map-img" />
+                <div id="ph_shap" style="display:none;"></div>
+              {% else %}
+                <div id="ph_shap" class="expl-map-placeholder">
+                  <i class="fa-solid fa-hourglass-half text-muted fa-2x mb-2"></i>
+                  <p class="text-muted small mb-0">Cliquez sur "Afficher l'explicabilité"</p>
+                </div>
+                <img id="img_shap" class="expl-map-img" style="display:none;" alt="SHAP" />
+              {% endif %}
+              <div class="expl-map-legend">
+                <span class="legend-dot" style="background:#440154;"></span><span class="text-muted me-2">Nul</span>
+                <span class="legend-dot" style="background:#31688e;"></span><span class="text-muted me-2">Faible</span>
+                <span class="legend-dot" style="background:#35b779;"></span><span class="text-muted me-2">Moyen</span>
+                <span class="legend-dot" style="background:#fde725;"></span><span class="text-muted">Fort</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hybrid — HOT colormap -->
+          <div class="col-6">
+            <div class="expl-map-card">
+              <div class="expl-map-label text-purple">
+                <i class="fa-solid fa-layer-group me-1"></i>Hybrid
+              </div>
+              {% if pred.hybrid_filename %}
+                <img id="img_hybrid"
+                     src="{{ url_for('static', filename='explainability/' + pred.hybrid_filename) }}"
+                     alt="Hybrid" class="expl-map-img" />
+                <div id="ph_hybrid" style="display:none;"></div>
+              {% else %}
+                <div id="ph_hybrid" class="expl-map-placeholder">
+                  <i class="fa-solid fa-hourglass-half text-muted fa-2x mb-2"></i>
+                  <p class="text-muted small mb-0">Cliquez sur "Afficher l'explicabilité"</p>
+                </div>
+                <img id="img_hybrid" class="expl-map-img" style="display:none;" alt="Hybrid" />
+              {% endif %}
+              <div class="expl-map-legend">
+                <span class="legend-dot" style="background:#111;"></span><span class="text-muted me-2">Nul</span>
+                <span class="legend-dot" style="background:#c00;"></span><span class="text-muted me-2">Faible</span>
+                <span class="legend-dot" style="background:#f80;"></span><span class="text-muted me-2">Élevé</span>
+                <span class="legend-dot" style="background:#ff0;"></span><span class="text-muted">Maximum</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Segmentation — overlay HOT + contour cyan -->
+          <div class="col-6">
+            <div class="expl-map-card">
+              <div class="expl-map-label text-success">
+                <i class="fa-solid fa-vector-square me-1"></i>Segmentation
+              </div>
+              {% if pred.segmentation_filename %}
+                <img id="img_segm"
+                     src="{{ url_for('static', filename='explainability/' + pred.segmentation_filename) }}"
+                     alt="Segmentation" class="expl-map-img" />
+                <div id="ph_segm" style="display:none;"></div>
+              {% else %}
+                <div id="ph_segm" class="expl-map-placeholder">
+                  <i class="fa-solid fa-hourglass-half text-muted fa-2x mb-2"></i>
+                  <p class="text-muted small mb-0">Cliquez sur "Afficher l'explicabilité"</p>
+                </div>
+                <img id="img_segm" class="expl-map-img" style="display:none;" alt="Segmentation" />
+              {% endif %}
+              <div class="expl-map-legend">
+                <span class="legend-dot" style="background:#e30;"></span><span class="text-muted me-2">Zone active</span>
+                <span class="legend-dot" style="background:#0ff;"></span><span class="text-muted me-2">Contour</span>
+                <span class="legend-dot" style="background:#333;"></span><span class="text-muted">Fond</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Interprétation automatique (cachée par défaut) ──────────────── -->
+    <div id="interpSection" class="card border-0 shadow-sm mb-3" style="display:none;">
+      <div class="card-header bg-white border-0 d-flex align-items-center gap-2">
+        <i class="fa-solid fa-comment-medical text-primary"></i>
+        <h6 class="fw-semibold mb-0">Interprétation automatique des cartes</h6>
+      </div>
+      <div class="card-body">
+
+        <!-- Bilan global -->
+        <div id="interpOverall" class="alert border-0 mb-3"
+             style="background:#e0f4fb;color:#0c3358;">
+          <i class="fa-solid fa-brain me-2" style="color:#29abe2;"></i>
+          <span id="interpOverallText"></span>
+        </div>
+
+        <!-- 4 cartes méthodes -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="card h-100 border-0" style="background:#fff5f5;">
+              <div class="card-header border-0 py-2" style="background:#fee2e2;">
+                <h6 class="mb-0 small fw-semibold text-danger">
+                  <i class="fa-solid fa-fire me-1"></i>GradCAM++
+                </h6>
+              </div>
+              <div class="card-body py-2">
+                <p id="interpGradcam" class="small text-secondary mb-0" style="line-height:1.6;"></p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card h-100 border-0" style="background:#f0fdff;">
+              <div class="card-header border-0 py-2" style="background:#cffafe;">
+                <h6 class="mb-0 small fw-semibold text-info">
+                  <i class="fa-solid fa-chart-area me-1"></i>SHAP
+                </h6>
+              </div>
+              <div class="card-body py-2">
+                <p id="interpShap" class="small text-secondary mb-0" style="line-height:1.6;"></p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card h-100 border-0" style="background:#faf5ff;">
+              <div class="card-header border-0 py-2" style="background:#ede9fe;">
+                <h6 class="mb-0 small fw-semibold" style="color:#7c3aed;">
+                  <i class="fa-solid fa-layer-group me-1"></i>Hybrid
+                </h6>
+              </div>
+              <div class="card-body py-2">
+                <p id="interpHybrid" class="small text-secondary mb-0" style="line-height:1.6;"></p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card h-100 border-0" style="background:#f0fdf4;">
+              <div class="card-header border-0 py-2" style="background:#d1fae5;">
+                <h6 class="mb-0 small fw-semibold text-success">
+                  <i class="fa-solid fa-vector-square me-1"></i>Segmentation
+                </h6>
+              </div>
+              <div class="card-body py-2">
+                <p id="interpSegm" class="small text-secondary mb-0" style="line-height:1.6;"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-muted x-small mt-3 mb-0">
+          <i class="fa-solid fa-circle-info me-1"></i>
+          Cette interprétation est générée automatiquement à titre indicatif.
+          Elle ne remplace pas l'expertise clinique du médecin.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Perturbation (cachée par défaut, révélée avec l'explicabilité) ── -->
+    <div id="perturbSection" class="card border-0 shadow-sm mb-3" style="display:none;">
+      <div class="card-header bg-white border-0">
+        <h6 class="fw-semibold mb-0">
+          <i class="fa-solid fa-flask-vial me-2 text-warning"></i>
+          Analyse de perturbation
+          <span class="text-muted small fw-normal ms-1">(intensity = 0.8 — drop &gt; 20% = explication valide)</span>
+        </h6>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-hover align-middle mb-0 small">
+          <thead class="table-light">
+            <tr>
+              <th>Méthode</th>
+              <th>Confiance originale</th>
+              <th>Drop de confiance</th>
+              <th>Validité</th>
+              <th>Barre</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% macro perturb_row(label, key, drop, color, bar_class) %}
+            <tr>
+              <td class="fw-semibold {{ color }}">
+                <i class="fa-solid fa-circle me-1" style="font-size:.5rem;"></i>{{ label }}
+              </td>
+              <td>
+                {% if pred.confidence %}{{ pred.confidence | round(1) }}%{% else %}—{% endif %}
+              </td>
+              <td>
+                {% if drop is not none %}
+                  <span id="drop_{{ key }}"
+                        class="fw-bold {% if drop > 20 %}text-success{% else %}text-danger{% endif %}">
+                    {{ drop | round(1) }}%
+                  </span>
+                {% else %}
+                  <span id="drop_{{ key }}" class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if drop is not none %}
+                  <span id="badge_{{ key }}"
+                    class="badge {% if drop > 20 %}bg-success-subtle text-success{% else %}bg-danger-subtle text-danger{% endif %}">
+                    {% if drop > 20 %}
+                      <i class="fa-solid fa-circle-check me-1"></i>Valide
+                    {% else %}
+                      <i class="fa-solid fa-circle-xmark me-1"></i>Faible
+                    {% endif %}
+                  </span>
+                {% else %}
+                  <span id="badge_{{ key }}" class="badge bg-secondary-subtle text-secondary">—</span>
+                {% endif %}
+              </td>
+              <td style="min-width:100px;">
+                <div class="progress" style="height:6px;">
+                  <div id="bar_{{ key }}" class="{{ bar_class }} progress-bar"
+                       style="width:{% if drop is not none %}{{ [drop, 100]|min }}{% else %}0{% endif %}%"></div>
+                </div>
+              </td>
+            </tr>
+            {% endmacro %}
+            {{ perturb_row('GradCAM++', 'gradcam', pred.perturb_drop_gradcam, 'text-danger', 'bg-danger') }}
+            {{ perturb_row('SHAP',      'shap',    pred.perturb_drop_shap,    'text-info',   'bg-info')   }}
+            {{ perturb_row('Hybrid',    'hybrid',  pred.perturb_drop_hybrid,  'text-purple', 'bg-purple') }}
+          </tbody>
+        </table>
+
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECTION DIAGNOSTIC — cas selon état
+    ═══════════════════════════════════════════════════════════ -->
+
+    <!-- ── Déjà traité ─────────────────────────────────────── -->
+    {% if pred.validated is not none %}
+    <div class="card border-0 shadow-sm border-{{ pred.status_class }}">
+      <div class="card-body text-center py-4">
+        <i class="fa-solid fa-circle-check fa-3x text-{{ pred.status_class }} mb-3"></i>
+        <h5 class="fw-bold">Analyse déjà traitée</h5>
+        <p class="text-muted mb-1">Diagnostic final :</p>
+        <h4 class="text-primary fw-bold">{{ pred.final_disease or '—' }}</h4>
+        <span class="badge bg-{{ pred.status_class }}-subtle text-{{ pred.status_class }} mt-1">
+          {{ pred.status_label }}
+        </span>
+      </div>
+    </div>
+
+    <!-- ── Connu → validation médecin ─────────────────────── -->
+    {% elif pred.is_known %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-0">
+        <h6 class="fw-semibold mb-0">
+          <i class="fa-solid fa-robot me-2 text-primary"></i>Résultat du modèle
+        </h6>
+      </div>
+      <div class="card-body">
+        <div class="result-disease-box mb-3">
+          <div class="text-muted small mb-1">Maladie détectée</div>
+          <h3 class="fw-bold text-primary mb-2">{{ pred.predicted_disease }}</h3>
+          {% if pred.confidence %}
+          <div class="d-flex align-items-center gap-2">
+            <div class="progress flex-grow-1" style="height:10px;">
+              <div class="progress-bar
+                {% if pred.confidence >= 85 %}bg-success
+                {% elif pred.confidence >= 70 %}bg-warning
+                {% else %}bg-danger{% endif %}"
+                style="width:{{ pred.confidence | int }}%"></div>
+            </div>
+            <span class="fw-bold fs-5">{{ pred.confidence | round(1) }}%</span>
+          </div>
+          {% endif %}
+        </div>
+
+        <p class="text-muted small mb-3">
+          <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>
+          Confirmez ou corrigez ce diagnostic avant archivage.
+        </p>
+
+        {% if not current_user.is_chef %}
+        <!-- Valider -->
+        <form method="POST" action="{{ url_for('doctor.validate', pred_id=pred.id) }}" class="mb-3">
+          <input type="hidden" name="action" value="correct" />
+          <button type="submit" class="btn btn-success w-100 py-2 fw-semibold">
+            <i class="fa-solid fa-circle-check me-2"></i>
+            Valider — Le diagnostic est correct ({{ pred.predicted_disease }})
+          </button>
+        </form>
+
+        <!-- Corriger -->
+        <div class="card bg-light border-0">
+          <div class="card-body">
+            <p class="fw-semibold mb-2 text-danger">
+              <i class="fa-solid fa-pen me-1"></i>Corriger le diagnostic
+            </p>
+            <form method="POST" action="{{ url_for('doctor.validate', pred_id=pred.id) }}"
+                  class="d-flex gap-2">
+              <input type="hidden" name="action" value="correct_with_name" />
+              <input type="text" name="corrected_disease" class="form-control"
+                     placeholder="Nom de la vraie maladie" required />
+              <button type="submit" class="btn btn-danger text-nowrap">
+                <i class="fa-solid fa-rotate me-1"></i>Corriger
+              </button>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <!-- Vue lecture seule pour le chef de service -->
+        <div class="alert alert-info border-0 mb-0">
+          <i class="fa-solid fa-eye me-2"></i>
+          <strong>En attente de validation</strong> — le médecin doit confirmer ou corriger ce diagnostic.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ── Inconnu (OOD) ────────────────────────────────────── -->
+    {% else %}
+    <div class="card border-0 shadow-sm border-warning">
+      <div class="card-header bg-warning-subtle border-0">
+        <h6 class="mb-0 fw-semibold text-warning">
+          <i class="fa-solid fa-circle-question me-2"></i>Maladie non reconnue — OOD
+        </h6>
+      </div>
+      <div class="card-body">
+        {% if not current_user.is_chef %}
+        <!-- Bouton Few Shot + résultat (médecin uniquement) -->
+        <div class="mb-3">
+          <button id="btnFewShot" class="btn btn-primary fw-semibold w-100"
+                  onclick="runFewShot()">
+            <i class="fa-solid fa-magnifying-glass-chart me-2"></i>
+            Few Shot — Comparer avec la base de données
+          </button>
+          <div id="fewShotResult" class="mt-3"></div>
+        </div>
+
+        <!-- Formulaire manuel — caché jusqu'au résultat few-shot -->
+        <div id="manualForm" style="display:none;">
+          <hr class="my-3">
+          <p class="fw-semibold small text-muted mb-2">
+            <i class="fa-solid fa-pen-to-square me-1"></i>
+            Saisir manuellement le nom de la maladie :
+          </p>
+          <form method="POST" action="{{ url_for('doctor.unknown_disease', pred_id=pred.id) }}">
+            <div class="input-group">
+              <input type="text" name="disease_name" id="diseaseNameInput"
+                     class="form-control form-control-lg"
+                     placeholder="ex : Pneumonie atypique" required />
+              <button type="submit" class="btn btn-warning fw-semibold">
+                <i class="fa-solid fa-floppy-disk me-1"></i>Enregistrer
+              </button>
+            </div>
+            <p class="text-muted small mt-1 mb-0">
+              <i class="fa-solid fa-circle-info me-1"></i>
+              Cette image sera ajoutée à la base few-shot (400 images/classe → ré-entraînement).
+            </p>
+          </form>
+        </div>
+        {% else %}
+        <!-- Vue lecture seule pour le chef de service -->
+        <div class="alert alert-warning border-0 mb-0">
+          <i class="fa-solid fa-circle-question me-2"></i>
+          <strong>Cas OOD en attente</strong> — le médecin doit identifier et enregistrer cette maladie.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Navigation -->
+    <div class="mt-3 d-flex gap-2">
+      {% if current_user.is_chef %}
+        <a href="{{ url_for('admin.validations') }}" class="btn btn-outline-primary">
+          <i class="fa-solid fa-arrow-left me-1"></i>Retour aux validations
+        </a>
+        <a href="{{ url_for('admin.dashboard') }}" class="btn btn-outline-secondary">
+          <i class="fa-solid fa-gauge-high me-1"></i>Tableau de bord
+        </a>
+      {% else %}
+        <a href="{{ url_for('doctor.upload') }}" class="btn btn-outline-primary">
+          <i class="fa-solid fa-plus me-1"></i>Nouvelle analyse
+        </a>
+        <a href="{{ url_for('doctor.dashboard') }}" class="btn btn-outline-secondary">
+          <i class="fa-solid fa-house me-1"></i>Tableau de bord
+        </a>
+      {% endif %}
+    </div>
+
+  </div><!-- /col droite -->
+</div><!-- /row -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRED_ID = {{ pred.id }};
+// URL explainability selon le rôle
+const EXPL_URL = "{{ url_for('admin.compute_explainability', pred_id=pred.id) if current_user.is_chef else url_for('doctor.compute_explainability', pred_id=pred.id) }}";
+// Images déjà calculées ?
+const EXPL_ALREADY_COMPUTED = {{ 'true' if (pred.gradcam_filename or pred.shap_filename) else 'false' }};
+// Interprétation pré-calculée (null si pas encore générée)
+const PRELOADED_INTERP = {{ (interpretation | tojson) if interpretation else 'null' }};
+
+/* ── Interprétation ────────────────────────────────────────── */
+function showInterpretation(interp) {
+  if (!interp) return;
+  document.getElementById('interpOverallText').textContent = interp.overall      || '';
+  document.getElementById('interpGradcam').textContent     = interp.gradcam      || '';
+  document.getElementById('interpShap').textContent        = interp.shap         || '';
+  document.getElementById('interpHybrid').textContent      = interp.hybrid       || '';
+  document.getElementById('interpSegm').textContent        = interp.segmentation || '';
+  document.getElementById('interpSection').style.display   = 'block';
+}
+
+/* ── Explicabilité ─────────────────────────────────────────── */
+function loadExplicabilite() {
+  const btn     = document.getElementById('btnExpl');
+  const sec     = document.getElementById('explSection');
+  const perturb = document.getElementById('perturbSection');
+
+  // Si déjà calculé → afficher + interprétation pré-chargée
+  if (EXPL_ALREADY_COMPUTED) {
+    sec.style.display     = 'block';
+    perturb.style.display = 'block';
+    btn.style.display     = 'none';
+    showInterpretation(PRELOADED_INTERP);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Calcul en cours… veuillez patienter';
+
+  fetch(EXPL_URL, { method: 'POST' })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-eye me-2"></i>Afficher l\'explicabilité';
+      alert('Erreur lors du calcul : ' + data.error);
+      return;
+    }
+
+    // Mettre à jour les images
+    const maps = {
+      'gradcam'  : data.gradcam_filename,
+      'shap'     : data.shap_filename,
+      'hybrid'   : data.hybrid_filename,
+      'segm'     : data.segmentation_filename,
+    };
+    Object.entries(maps).forEach(([key, fname]) => {
+      if (fname) {
+        const img = document.getElementById('img_' + key);
+        const ph  = document.getElementById('ph_' + key);
+        if (img) { img.src = `/static/explainability/${fname}`; img.style.display = 'block'; }
+        if (ph)  ph.style.display = 'none';
+      }
+    });
+
+    // Mettre à jour les drops de perturbation + badges validité
+    ['gradcam', 'shap', 'hybrid'].forEach(m => {
+      const dropEl  = document.getElementById('drop_' + m);
+      const badgeEl = document.getElementById('badge_' + m);
+      const barEl   = document.getElementById('bar_' + m);
+      const val     = data['perturb_drop_' + m];
+      if (val !== undefined && val !== null) {
+        if (dropEl) {
+          dropEl.textContent = val.toFixed(1) + '%';
+          dropEl.className   = 'fw-bold ' + (val > 20 ? 'text-success' : 'text-danger');
+        }
+        if (badgeEl) {
+          badgeEl.innerHTML = val > 20
+            ? '<i class="fa-solid fa-circle-check me-1"></i>Valide'
+            : '<i class="fa-solid fa-circle-xmark me-1"></i>Faible';
+          badgeEl.className = val > 20
+            ? 'badge bg-success-subtle text-success'
+            : 'badge bg-danger-subtle text-danger';
+        }
+        if (barEl) {
+          barEl.style.width = Math.min(val, 100) + '%';
+          barEl.className   = (val > 20 ? 'bg-success' : 'bg-danger') + ' progress-bar';
+        }
+      }
+    });
+
+    sec.style.display     = 'block';
+    perturb.style.display = 'block';
+    btn.style.display     = 'none';
+
+    // Afficher l'interprétation reçue du serveur
+    showInterpretation(data.interpretation);
+  })
+  .catch(err => {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-eye me-2"></i>Afficher l\'explicabilité';
+    alert('Erreur réseau : ' + err);
+  });
+}
+
+function hideExpl() {
+  document.getElementById('explSection').style.display    = 'none';
+  document.getElementById('perturbSection').style.display = 'none';
+  document.getElementById('interpSection').style.display  = 'none';
+  const btn = document.getElementById('btnExpl');
+  btn.style.display = 'inline-flex';
+}
+
+/* ── Few Shot ──────────────────────────────────────────────── */
+function runFewShot() {
+  const btn        = document.getElementById('btnFewShot');
+  const res        = document.getElementById('fewShotResult');
+  const manualForm = document.getElementById('manualForm');
+
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Comparaison en cours… veuillez patienter';
+
+  fetch(`/doctor/few-shot/${PRED_ID}`, { method: 'POST' })
+  .then(r => r.json())
+  .then(data => {
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass-chart me-2"></i>Few Shot — Relancer la comparaison';
+
+    if (data.error) {
+      res.innerHTML = `<div class="alert alert-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>${data.error}</div>`;
+      manualForm.style.display = 'block';
+      return;
+    }
+
+    const counts    = data.counts || {};
+    const noBase    = Object.keys(counts).length === 0;
+    const countHtml = Object.entries(counts)
+      .map(([cls, n]) => `<span class="badge bg-secondary-subtle text-secondary me-1">${cls} : ${n}</span>`)
+      .join('');
+    const thrNull   = data.threshold === null || data.threshold === undefined;
+    const thr       = thrNull ? null : data.threshold;
+
+    if (data.found) {
+      /* ── Maladie identifiée → Valider / Corriger ───────────── */
+      btn.style.display = 'none';
+
+      res.innerHTML = `
+        <div class="result-disease-box mb-3">
+          <div class="text-muted small mb-1">Maladie détectée (Few-Shot)</div>
+          <h3 class="fw-bold text-primary mb-0">${data.disease}</h3>
+        </div>
+
+        <p class="text-muted small mb-3">
+          <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>
+          Confirmez ou corrigez ce diagnostic avant archivage.
+        </p>
+
+        <form method="POST" action="/doctor/validate/${PRED_ID}" class="mb-3">
+          <input type="hidden" name="action" value="correct" />
+          <button type="submit" class="btn btn-success w-100 py-2 fw-semibold">
+            <i class="fa-solid fa-circle-check me-2"></i>
+            Valider — Le diagnostic est correct (${data.disease})
+          </button>
+        </form>
+
+        <div class="card bg-light border-0">
+          <div class="card-body">
+            <p class="fw-semibold mb-2 text-danger">
+              <i class="fa-solid fa-pen me-1"></i>Corriger le diagnostic
+            </p>
+            <form method="POST" action="/doctor/validate/${PRED_ID}" class="d-flex gap-2">
+              <input type="hidden" name="action" value="correct_with_name" />
+              <input type="text" name="corrected_disease" class="form-control"
+                     placeholder="Nom de la vraie maladie" value="${data.disease}" required />
+              <button type="submit" class="btn btn-danger text-nowrap">
+                <i class="fa-solid fa-rotate me-1"></i>Corriger
+              </button>
+            </form>
+          </div>
+        </div>`;
+
+    } else {
+      /* ── Maladie inconnue ──────────────────────────────────── */
+      const reason = noBase
+        ? 'La base few-shot est vide — aucune image soumise pour l\'instant.'
+        : (thrNull
+            ? 'Trop peu d\'images dans la base (N < 2) pour établir un seuil.'
+            : `Distance min : <strong>${data.distance}</strong> > seuil ${thr} — aucune classe ne correspond.`);
+
+      res.innerHTML = `
+        <div class="alert alert-warning border-0">
+          <i class="fa-solid fa-circle-question me-2"></i>
+          <strong>Maladie inconnue</strong>
+          <br><span class="small">${reason}</span>
+          <br><span class="small text-muted mt-1 d-block">Saisissez manuellement le nom ci-dessous pour enrichir la base few-shot.</span>
+          ${countHtml ? `<div class="mt-2">${countHtml}</div>` : ''}
+        </div>`;
+
+      manualForm.style.display = 'block';
+    }
+  })
+  .catch(err => {
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass-chart me-2"></i>Few Shot — Comparer avec la base de données';
+    res.innerHTML = `<div class="alert alert-danger">Erreur réseau : ${err}</div>`;
+    manualForm.style.display = 'block';
+  });
+}
+</script>
+{% endblock %}

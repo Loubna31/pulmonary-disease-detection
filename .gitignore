@@ -1,0 +1,26 @@
+# Données médicales — ne jamais uploader
+uploads/
+few_shot_data/
+few_shot_per_class/
+
+# Modèles lourds
+models/*.h5
+models/*.pth
+models/*.pkl
+
+# Base de données
+*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Logs
+*.log
+*.txt
+app_output.log
+flask_err.txt
+flask_log.txt
+flask_out.txt

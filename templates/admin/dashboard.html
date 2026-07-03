@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}Tableau de bord — Chef de service{% endblock %}
+{% block page_title %}<i class="fa-solid fa-gauge-high me-2"></i>Tableau de bord{% endblock %}
+
+{% block content %}
+
+<!-- Stat cards (5) -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl">
+    <div class="stat-card border-primary">
+      <div class="stat-icon bg-primary-subtle text-primary">
+        <i class="fa-solid fa-user-doctor"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Médecins actifs</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ total_medecins }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl">
+    <div class="stat-card border-info">
+      <div class="stat-icon bg-info-subtle text-info">
+        <i class="fa-solid fa-x-ray"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Analyses totales</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ total_predictions }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl">
+    <div class="stat-card border-success">
+      <div class="stat-icon bg-success-subtle text-success">
+        <i class="fa-solid fa-clipboard-check"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Validées</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ total_validated }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl">
+    <div class="stat-card border-danger">
+      <div class="stat-icon bg-danger-subtle text-danger">
+        <i class="fa-solid fa-circle-question"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Cas inconnus</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ total_unknown }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl">
+    <div class="stat-card border-danger">
+      <div class="stat-icon bg-danger-subtle text-danger">
+        <i class="fa-solid fa-pen-to-square"></i>
+      </div>
+      <div>
+        <div class="stat-label" style="font-size:1rem;font-weight:700;color:#0b1f18;">Corrigées</div>
+        <div class="stat-value" style="font-size:0.85rem;font-weight:500;color:#6b7280;">{{ total_corrected }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Disease breakdown + Few-shot + Retrain -->
+<div class="row g-3 mb-4">
+
+  <!-- Disease breakdown -->
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header">
+        <h6 class="mb-0 fw-semibold">
+          <i class="fa-solid fa-chart-pie me-2" style="color:var(--primary);"></i>
+          Maladies détectées
+        </h6>
+      </div>
+      <div class="card-body">
+        {% if disease_counts %}
+          {% set max_count = disease_counts.values() | max %}
+          {% for disease, count in disease_counts.items() %}
+          {% set pct = (count / max_count * 100) | int %}
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="small fw-semibold" style="color:#065f46;">{{ disease }}</span>
+              <span class="badge bg-primary-subtle text-primary fw-bold">{{ count }}</span>
+            </div>
+            <div class="progress" style="height:7px;">
+              <div class="progress-bar" style="width:{{ pct }}%;background:var(--primary);"></div>
+            </div>
+          </div>
+          {% endfor %}
+          {% if total_unknown > 0 %}
+          <div class="mb-0">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="small fw-semibold text-danger">
+                <i class="fa-solid fa-circle-question me-1"></i>Inconnus
+              </span>
+              <span class="badge bg-danger-subtle text-danger fw-bold">{{ total_unknown }}</span>
+            </div>
+            {% set pct_unk = (total_unknown / max_count * 100) | int %}
+            <div class="progress" style="height:7px;">
+              <div class="progress-bar bg-danger" style="width:{{ [pct_unk,100]|min }}%;"></div>
+            </div>
+          </div>
+          {% endif %}
+        {% else %}
+          <div class="text-center py-4">
+            <i class="fa-solid fa-chart-pie fa-2x mb-2" style="color:#d1fae5;"></i>
+            <p class="text-muted small mb-0">Aucune donnée disponible</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Few-shot per-class progress -->
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 fw-semibold">
+          <i class="fa-solid fa-database me-2 text-purple"></i>Base Few-Shot par classe
+        </h6>
+        <span class="badge bg-secondary-subtle text-secondary fw-normal">
+          seuil : {{ per_class_thresh }} images/classe
+        </span>
+      </div>
+      <div class="card-body">
+        {% if per_class_counts %}
+          {% for cls, count in per_class_counts.items() %}
+          {% set pct = [(count / per_class_thresh * 100)|int, 100]|min %}
+          <div class="mb-3">
+            <div class="d-flex justify-content-between small mb-1">
+              <span class="fw-semibold">{{ cls }}</span>
+              <span class="{% if count >= per_class_thresh %}text-success fw-bold{% else %}text-muted{% endif %}">
+                {{ count }} / {{ per_class_thresh }}
+                {% if count >= per_class_thresh %}
+                  <i class="fa-solid fa-circle-check text-success ms-1"></i>
+                {% endif %}
+              </span>
+            </div>
+            <div class="progress" style="height:8px;">
+              <div class="progress-bar
+                {% if pct >= 100 %}bg-success
+                {% elif pct >= 70 %}bg-warning
+                {% else %}bg-primary{% endif %}"
+                style="width:{{ pct }}%;"></div>
+            </div>
+          </div>
+          {% endfor %}
+
+          {% if per_class_counts.values() | select('ge', per_class_thresh) | list | length > 0 %}
+          <div class="alert alert-success py-2 mt-2 mb-0 d-flex align-items-center gap-3">
+            <i class="fa-solid fa-rocket fa-lg"></i>
+            <div>
+              <strong>Seuil atteint !</strong> Vous pouvez relancer l'entraînement.
+              <form method="POST" action="{{ url_for('admin.manual_retrain') }}" class="d-inline ms-2">
+                <button type="submit" class="btn btn-success btn-sm fw-semibold"
+                        onclick="return confirm('Lancer le ré-entraînement ?')">
+                  <i class="fa-solid fa-play me-1"></i>Relancer l'entraînement
+                </button>
+              </form>
+            </div>
+          </div>
+          {% else %}
+          <p class="text-muted small mt-2 mb-0">
+            <i class="fa-solid fa-circle-info me-1"></i>
+            Aucune classe n'a encore atteint {{ per_class_thresh }} images.
+          </p>
+          {% endif %}
+        {% else %}
+          <p class="text-muted mb-0">Aucune image few-shot soumise pour l'instant.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Last retrain -->
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header">
+        <h6 class="mb-0 fw-semibold">
+          <i class="fa-solid fa-gears me-2 text-secondary"></i>Dernier ré-entraînement
+        </h6>
+      </div>
+      <div class="card-body d-flex flex-column">
+        {% if last_retrain %}
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge
+              {% if last_retrain.status == 'completed' %}bg-success
+              {% elif last_retrain.status == 'running' %}bg-warning text-dark
+              {% elif last_retrain.status == 'failed' %}bg-danger
+              {% else %}bg-secondary{% endif %}">
+              {{ last_retrain.status | upper }}
+            </span>
+            <span class="text-muted small">{{ last_retrain.triggered_at.strftime('%d/%m/%Y %H:%M') }}</span>
+          </div>
+          <p class="mb-1 small text-muted">{{ last_retrain.sample_count }} images utilisées</p>
+          {% if last_retrain.notes %}
+            <p class="mb-0 small text-danger">{{ last_retrain.notes }}</p>
+          {% endif %}
+        {% else %}
+          <p class="text-muted mb-3 small">Aucun ré-entraînement effectué.</p>
+        {% endif %}
+        <form method="POST" action="{{ url_for('admin.manual_retrain') }}" class="mt-auto">
+          <button type="submit" class="btn btn-outline-secondary btn-sm w-100"
+                  onclick="return confirm('Forcer le ré-entraînement maintenant ?')">
+            <i class="fa-solid fa-rotate me-1"></i>Forcer ré-entraînement
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent activity -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h6 class="mb-0 fw-semibold">
+      <i class="fa-solid fa-clock-rotate-left me-2" style="color:var(--primary);"></i>
+      Analyses récentes
+    </h6>
+    <a href="{{ url_for('admin.validations') }}" class="btn btn-sm btn-outline-primary">
+      Voir tout <i class="fa-solid fa-arrow-right ms-1"></i>
+    </a>
+  </div>
+  <div class="card-body p-0">
+    {% if recent_predictions %}
+    <div class="table-responsive" style="max-height:420px;overflow-y:auto;">
+      <table class="table table-hover align-middle mb-0" style="font-size:.83rem;">
+        <thead style="position:sticky;top:0;z-index:2;">
+          <tr>
+            <th>ID Image</th>
+            <th>Médecin</th>
+            <th>Modèle</th>
+            <th>Méthode OOD</th>
+            <th>Maladie prédite</th>
+            <th>Statut</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in recent_predictions %}
+          <tr class="table-row-link"
+              onclick="window.location='{{ url_for('admin.result', pred_id=p.id) }}'">
+            <td>
+              <span class="badge bg-secondary-subtle text-secondary fw-normal"
+                    style="font-family:monospace;font-size:.75rem;"
+                    title="{{ p.image_filename }}">
+                {{ p.image_filename.split('.')[0][:12] }}
+              </span>
+            </td>
+            <td><span class="fw-semibold">{{ p.doctor.username }}</span></td>
+            <td>
+              <span class="badge bg-primary-subtle text-primary fw-semibold">
+                {{ p.model_used | upper }}
+              </span>
+            </td>
+            <td>
+              {% if p.method_used %}
+                <span class="badge bg-secondary-subtle text-secondary">{{ p.method_used }}</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td>
+              {% if p.is_known %}
+                {{ p.predicted_disease or '—' }}
+              {% else %}
+                <span class="text-danger fw-semibold">
+                  <i class="fa-solid fa-circle-question me-1"></i>Inconnu
+                </span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge bg-{{ p.status_class }}-subtle text-{{ p.status_class }}">
+                {{ p.status_label }}
+              </span>
+            </td>
+            <td class="text-muted small">{{ p.created_at.strftime('%d/%m %H:%M') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="text-muted text-center py-4">Aucune analyse enregistrée.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

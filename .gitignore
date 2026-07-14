@@ -24,3 +24,4 @@ app_output.log
 flask_err.txt
 flask_log.txt
 flask_out.txt
+.claude/
